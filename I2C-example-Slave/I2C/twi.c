@@ -119,6 +119,29 @@ static volatile uint8_t TWI_bytesRequest;		// Number of bytes requested
 #elif defined(TWI_SLAVE_ENABLED)
 #endif
 
+/************************************************************************/
+/* Private functions                                                    */
+/************************************************************************/
+
+/**
+ *  @brief   Put byte to ringbuffer for transmitting via I2C
+ *  @param   data byte to be transmitted
+ *  @return  none
+ */
+void twi_putc(uint8_t data);
+
+/**
+ *  @brief   Put string to ringbuffer for transmitting via I2C
+ *
+ *  The string is buffered by the I2C library in a circular buffer
+ *  and one character at a time is transmitted to the I2C using interrupts.
+ *  Blocks if it can not write the whole string into the circular buffer.
+ * 
+ *  @param   s string to be transmitted
+ *  @return  none
+ */
+void twi_puts(const char *s );
+
 
 /*************************************************************************
 Function: TWI interrupt
@@ -506,7 +529,7 @@ Purpose:  Determine the number of bytes waiting in the receive buffer
 Input:    None
 Returns:  Integer number of bytes in the receive buffer
 **************************************************************************/
-uint16_t twi_available(void)
+uint8_t twi_available(void)
 {
 	return (TWI_RX_BUFFER_SIZE + TWI_RxHead - TWI_RxTail) & TWI_RX_BUFFER_MASK;
 }

@@ -133,29 +133,10 @@ extern void twi_slave_transmit(const char *s);
 extern uint8_t twi_getc(void);
 
 /**
- *  @brief   Put byte to ringbuffer for transmitting via I2C
- *  @param   data byte to be transmitted
- *  @return  none
- */
-extern void twi_putc(uint8_t data);
-
-/**
- *  @brief   Put string to ringbuffer for transmitting via I2C
- *
- *  The string is buffered by the I2C library in a circular buffer
- *  and one character at a time is transmitted to the I2C using interrupts.
- *  Blocks if it can not write the whole string into the circular buffer.
- * 
- *  @param   s string to be transmitted
- *  @return  none
- */
-extern void twi_puts(const char *s );
-
-/**
  *  @brief   Return number of bytes waiting in the receive buffer
  *  @return  bytes waiting in the receive buffer
  */
-extern uint16_t twi_available(void);
+extern uint8_t twi_available(void);
 
 /**
  *  @brief   Flush bytes waiting in receive buffer
