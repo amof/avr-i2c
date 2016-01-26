@@ -38,7 +38,7 @@ int main(void)
 	sei();
 	
 	_delay_ms(25);
-	twi_master_transmit(slaveAddress, "HELLO WORLD");
+	twi_master_transmits(slaveAddress, "HELLO WORLD");
 	_delay_ms(5);
 	twi_master_read(slaveAddress, 11);
 	
