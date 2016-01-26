@@ -71,6 +71,16 @@ LICENSE:
 #define TWI_TX_BUFFER_SIZE 64 /**< Size of the circular transmit buffer, must be power of 2 */
 #endif
 
+/* TWI struct to know status of transmission */
+
+struct TWI_statusReg
+{
+	uint8_t currentState;
+	uint8_t lastTransOK;
+};
+
+volatile struct TWI_statusReg TWI_statusReg;
+
 /************************************************************************/
 /* Functions prototype                                                  */
 /************************************************************************/
@@ -88,7 +98,15 @@ extern void twi_master_init(uint8_t scl_frequency);
  *  @param   s string to be transmitted
  *  @return  none
  */
-extern void twi_master_transmit(uint8_t slaveAddress, const char *s);
+extern void twi_master_transmits(uint8_t slaveAddress, const char *s);
+
+/**
+ *  @brief   Put char to ringbuffer for transmitting via I2C & start transmission
+ *			 Stop when nothing more to transmit
+ *  @param   c char to be transmitted
+ *  @return  none
+ */
+extern void twi_master_transmitc(uint8_t slaveAddress, uint8_t data);
 
 /**
  *  @brief   Read x bytes from the slave
@@ -97,6 +115,24 @@ extern void twi_master_transmit(uint8_t slaveAddress, const char *s);
  *  @return  none
  */
 extern void twi_master_read(uint8_t slaveAddress, uint8_t numberOfBytes);
+
+/**
+ *  @brief   Put regAdress+string to ringbuffer for transmitting via I2C & start transmission
+ *			 Stop when nothing more to transmit
+ *  @param   regAdress is the address of the register
+ *  @param   s string to be transmitted
+ *  @return  none
+ */
+extern void twi_master_transmitToRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t data);
+
+/**
+ *  @brief   Write the register address then read x bytes from the slave
+ *  @param   slaveAddress is the address of the slave
+ *  @param   regAdress is the address of the register
+ *  @param   numberOfBytes to read from the slave
+ *  @return  none
+ */
+extern void twi_master_readRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t numberOfBytes);
 
 /**
  *  @brief   Initialize SPI in Slave Mode

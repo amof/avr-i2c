@@ -25,20 +25,12 @@
 /* TWI constants                                                        */
 /************************************************************************/
 
-/* TWI struct to know status of transmission */
-
-struct TWI_statusReg
-{
-	uint8_t currentState;
-	uint8_t lastTransOK;
-};
+#define TRUE	1
+#define FALSE	0
 
 #define TWI_STATE_WAIT		0
 #define TWI_STATE_SEND		1
 #define TWI_STATE_REQUEST	2
-
-#define TRUE	1
-#define FALSE	0
 
 /*  Bit and byte definitions */
 
@@ -110,7 +102,6 @@ static volatile uint8_t TWI_TxTail;
 static volatile uint8_t TWI_RxHead;
 static volatile uint8_t TWI_RxTail;
 
-volatile struct TWI_statusReg TWI_statusReg;
 static volatile uint8_t TWI_bytesRequest;		// Number of bytes requested
 
 #if defined (TWI_MASTER_ENABLED) && defined(TWI_SLAVE_ENABLED)
@@ -168,23 +159,17 @@ ISR(TWI_vect){
 		
 			//2. Data byte has been transmitted and ACK received
 			case TWI_MTX_DATA_ACK:
-			if ( TWI_TxHead != TWI_TxTail) {
+			if(TWI_TxTail != TWI_TxHead) {
 				// calculate and store new buffer index
 				tmptail = (TWI_TxTail + 1) & TWI_TX_BUFFER_MASK;
 				TWI_TxTail = tmptail;
 
 				TWDR = TWI_TxBuf[tmptail];
-				TWCR = (1<<TWEN)|							// TWI Interface enabled
-				(1<<TWIE)|(1<<TWINT)|						// Enable TWI Interrupt and clear the flag to send byte
-				(0<<TWEA)|(0<<TWSTA)|(0<<TWSTO)|			//
-				(0<<TWWC);									//
+				TWNACK;
 			}else // Send STOP after last byte
 			{
 				TWI_statusReg.lastTransOK = TRUE;			// Set status bits to completed successfully.
-				TWCR = (1<<TWEN)|							// TWI Interface enabled
-				(0<<TWIE)|(1<<TWINT)|						// Disable TWI Interrupt and clear the flag
-				(0<<TWEA)|(0<<TWSTA)|(1<<TWSTO)|			// Initiate a STOP condition.
-				(0<<TWWC);									//
+				TWSTOP;
 			}
 			break;
 		
@@ -202,12 +187,12 @@ ISR(TWI_vect){
 			//2. Data byte has been received and send ACK to continue or NACK to stop
 			case TWI_MRX_DATA_ACK:
 			tmphead = ( TWI_RxHead + 1) & TWI_RX_BUFFER_MASK;
+			// store new index
+			TWI_RxHead = tmphead;
+			// store received data in buffer
+			TWI_RxBuf[tmphead] = TWDR; // Detect the last byte to ACK it.
 			if (TWI_bytesRequest>0) {
 				TWI_bytesRequest--;
-				// store new index
-				TWI_RxHead = tmphead;
-				// store received data in buffer
-				TWI_RxBuf[tmphead] = TWDR; // Detect the last byte to ACK it.
 				TWACK;
 			} else{
 				TWNACK; // Send NACK after next reception
@@ -371,10 +356,14 @@ Input:    address of the slave
 Input:    string to be transmitted
 Returns:  none
 **************************************************************************/
-void twi_master_transmit(uint8_t slaveAddress, const char *s)
+void twi_master_transmits(uint8_t slaveAddress, const char *s)
 {
+	// Wait until TWI is ready for next transmission.
+	while (twi_busy());
+	
 	//Reset State twi status
 	TWI_statusReg.lastTransOK=FALSE;
+	TWI_statusReg.currentState=TWI_STATE_SEND;
 	
 	// The first byte must always consist of General Call code or the TWI slave address.
 	twi_putc((slaveAddress<<TWI_ADR_BITS) | (FALSE<<TWI_READ_BIT)); 
@@ -382,10 +371,33 @@ void twi_master_transmit(uint8_t slaveAddress, const char *s)
 	// Stores data in buffer
 	while (*s) {
 		twi_putc(*s++);
-	}
-	
+	}		
+
+	// Launch the transmission
+	TWSTART;
+}
+
+/*************************************************************************
+Function: twi_master_transmit()
+Purpose:  transmit string to I2C and launch the I2C communication
+Input:    address of the slave
+Input:    string to be transmitted
+Returns:  none
+**************************************************************************/
+void twi_master_transmitc(uint8_t slaveAddress, uint8_t data)
+{
 	// Wait until TWI is ready for next transmission.
-	while (twi_busy());						
+	while (twi_busy());
+		
+	//Reset State twi status
+	TWI_statusReg.lastTransOK=FALSE;
+	TWI_statusReg.currentState=TWI_STATE_SEND;
+	
+	// The first byte must always consist of General Call code or the TWI slave address.
+	twi_putc((slaveAddress<<TWI_ADR_BITS) | (FALSE<<TWI_READ_BIT));
+	
+	// Stores data in buffer
+	twi_putc(data);
 
 	// Launch the transmission
 	TWSTART;
@@ -400,8 +412,12 @@ Returns:  none
 **************************************************************************/
 void twi_master_read(uint8_t slaveAddress, uint8_t numberOfBytes)
 {
+	// Wait until TWI is ready for next transmission.
+	while (twi_busy());
+	
 	//Reset State twi status
 	TWI_statusReg.lastTransOK=FALSE;
+	TWI_statusReg.currentState=TWI_STATE_REQUEST;
 	
 	// last byte of data must be NACK
 	TWI_bytesRequest = numberOfBytes-1;  // Number of data to transmit.
@@ -409,11 +425,55 @@ void twi_master_read(uint8_t slaveAddress, uint8_t numberOfBytes)
 	// The first byte must always consist of General Call code or the TWI slave address.
 	twi_putc((slaveAddress<<TWI_ADR_BITS) | (TRUE<<TWI_READ_BIT));
 	
-	// Wait until TWI is ready for next transmission.
-	while (twi_busy());
-	
 	// Launch the transmission
 	TWSTART;
+}
+
+/*************************************************************************
+Function: twi_master_transmit()
+Purpose:  transmit string to I2C and launch the I2C communication
+Input:    address of the slave
+Input:    string to be transmitted
+Returns:  none
+**************************************************************************/
+void twi_master_transmitToRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t data)
+{
+	//Reset State twi status
+	TWI_statusReg.lastTransOK=FALSE;
+	
+	// The first byte must always consist of General Call code or the TWI slave address.
+	twi_putc((slaveAddress<<TWI_ADR_BITS) | (FALSE<<TWI_READ_BIT));
+	
+	// Put register address
+	twi_putc(regAdress);
+	twi_putc(data);
+	
+	// Wait until TWI is ready for next transmission.
+	while (twi_busy());
+
+	// Launch the transmission
+	TWSTART;
+	
+	while(TWI_statusReg.lastTransOK==FALSE && twi_busy()) ;
+}
+
+/*************************************************************************
+Function: twi_master_readRegister()
+Purpose:  Write the register address then read x bytes from the slave
+Input:    slaveAdress is the I2C address of the slave
+Input:    regAdress is the address of the register
+Input:    numberOfBytes that want to be read
+Returns:  none
+**************************************************************************/
+void twi_master_readRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t numberOfBytes)
+{
+	twi_master_transmitc(slaveAddress, regAdress);
+	
+	while(TWI_statusReg.lastTransOK==FALSE && twi_busy()) ;
+	
+	twi_master_read(slaveAddress, numberOfBytes);
+	
+	while(TWI_statusReg.lastTransOK==FALSE && twi_busy()) ;
 }
 
 #elif defined(TWI_SLAVE_ENABLED)
@@ -474,19 +534,19 @@ Returns:  byte:  received byte from ringbuffer
 uint8_t twi_getc(void)
 {
 	uint16_t tmptail;
-	uint8_t data;
+	uint8_t data=0;
 
 	if ( TWI_RxHead == TWI_RxTail ) {
 		/* no data available */
 	}
+	else{
+		/* calculate /store buffer index */
+		tmptail = (TWI_RxTail + 1) & TWI_RX_BUFFER_MASK;
+		TWI_RxTail = tmptail;
 
-	/* calculate /store buffer index */
-	tmptail = (TWI_RxTail + 1) & TWI_RX_BUFFER_MASK;
-	TWI_RxTail = tmptail;
-
-	/* get data from receive buffer */
-	data = TWI_RxBuf[tmptail];
-
+		/* get data from receive buffer */
+		data = TWI_RxBuf[tmptail];
+	}
 	return data;
 }
 
