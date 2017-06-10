@@ -46,10 +46,10 @@
 #define TWI_ARB_LOST               0x38  // Arbitration lost in SLA+W or data bytes
 										 //						SLA+R or NACK bit
 // TWI Master Transmitter status codes                      
-#define TWI_MTX_ADR_ACK            0x18  // SLA+W has been tramsmitted and ACK received
-#define TWI_MTX_ADR_NACK           0x20  // SLA+W has been tramsmitted and NACK received 
-#define TWI_MTX_DATA_ACK           0x28  // Data byte has been tramsmitted and ACK received
-#define TWI_MTX_DATA_NACK          0x30  // Data byte has been tramsmitted and NACK received
+#define TWI_MTX_ADR_ACK            0x18  // SLA+W has been transmitted and ACK received
+#define TWI_MTX_ADR_NACK           0x20  // SLA+W has been transmitted and NACK received 
+#define TWI_MTX_DATA_ACK           0x28  // Data byte has been transmitted and ACK received
+#define TWI_MTX_DATA_NACK          0x30  // Data byte has been transmitted and NACK received
 
 // TWI Slave Transmitter status codes
 #define TWI_STX_ADR_ACK            0xA8  // Own SLA+R has been received; ACK has been returned
@@ -59,10 +59,10 @@
 #define TWI_STX_DATA_ACK_LAST_BYTE 0xC8  // Last data byte in TWDR has been transmitted (TWEA = “0”); ACK has been received 
 
 // TWI Master Receiver status codes  
-#define TWI_MRX_ADR_ACK            0x40  // SLA+R has been tramsmitted and ACK received
-#define TWI_MRX_ADR_NACK           0x48  // SLA+R has been tramsmitted and NACK received
-#define TWI_MRX_DATA_ACK           0x50  // Data byte has been received and ACK tramsmitted
-#define TWI_MRX_DATA_NACK          0x58  // Data byte has been received and NACK tramsmitted
+#define TWI_MRX_ADR_ACK            0x40  // SLA+R has been transmitted and ACK received
+#define TWI_MRX_ADR_NACK           0x48  // SLA+R has been transmitted and NACK received
+#define TWI_MRX_DATA_ACK           0x50  // Data byte has been received and ACK transmitted
+#define TWI_MRX_DATA_NACK          0x58  // Data byte has been received and NACK transmitted
 
 // TWI Slave Receiver status codes
 #define TWI_SRX_ADR_ACK            0x60  // Own SLA+W has been received ACK has been returned
@@ -81,15 +81,15 @@
 
 // TWI TWCR shortcuts
 #define TWSTART		TWCR =	(1<<TWEN)					|(1<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(1<<TWSTA)|(0<<TWSTO)		|(0<<TWWC)
-							//TWI Interface enabled		|Enable TWI Interupt and clear the flag to send byte		|Initiate a START condition
+							//TWI Interface enabled		|Enable TWI Interrupt and clear the flag to send byte		|Initiate a START condition
 #define TWACK		TWCR =	(1<<TWEN)					|(1<<TWIE)|(1<<TWINT)										|(1<<TWEA)|(0<<TWSTA)|(0<<TWSTO)		|(0<<TWWC)
-							//TWI Interface enabled		|Enable TWI Interupt and clear the flag to send byte		|Send ACK after next reception
+							//TWI Interface enabled		|Enable TWI Interrupt and clear the flag to send byte		|Send ACK after next reception
 #define TWNACK		TWCR =	(1<<TWEN)					|(1<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(0<<TWSTA)|(0<<TWSTO)		|(0<<TWWC)
-							//TWI Interface enabled		|Enable TWI Interupt and clear the flag to read next byte	|Send NACK after reception
+							//TWI Interface enabled		|Enable TWI Interrupt and clear the flag to read next byte	|Send NACK after reception
 #define TWSTOP		TWCR =	(1<<TWEN)					|(0<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(0<<TWSTA)|(1<<TWSTO)		|(0<<TWWC)
 							//TWI Interface enabled		|Disable TWI Interrupt and clear the flag					|Initiate a STOP condition
 #define TWRESTART	TWCR =	(1<<TWEN)					|(1<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(1<<TWSTA)|(0<<TWSTO)		|(0<<TWWC)
-							//TWI Interface enabled		|Enable TWI Interupt and clear the flag						|Initiate a (RE)START condition.		
+							//TWI Interface enabled		|Enable TWI Interrupt and clear the flag					|Initiate a (RE)START condition.		
 
 /************************************************************************/
 /* Global variable                                                      */
@@ -101,6 +101,7 @@ static volatile uint8_t TWI_TxHead;
 static volatile uint8_t TWI_TxTail;
 static volatile uint8_t TWI_RxHead;
 static volatile uint8_t TWI_RxTail;
+static volatile uint8_t automaticStop = 1;
 
 static volatile uint8_t TWI_bytesRequest;		// Number of bytes requested
 
@@ -122,7 +123,7 @@ static volatile uint8_t TWI_bytesRequest;		// Number of bytes requested
 void twi_putc(uint8_t data);
 
 /**
- *  @brief   Put string to ringbuffer for transmitting via I2C
+ *  @brief   Put string to ring buffer for transmitting via I2C
  *
  *  The string is buffered by the I2C library in a circular buffer
  *  and one character at a time is transmitted to the I2C using interrupts.
@@ -136,7 +137,7 @@ void twi_puts(const char *s );
 
 /*************************************************************************
 Function: TWI interrupt
-Purpose:  called when the TWI event has occured
+Purpose:  called when the TWI event has occurred
 **************************************************************************/
 ISR(TWI_vect){
 
@@ -169,12 +170,13 @@ ISR(TWI_vect){
 			}else // Send STOP after last byte
 			{
 				TWI_statusReg.lastTransOK = TRUE;			// Set status bits to completed successfully.
-				TWSTOP;
+				if(automaticStop==1)TWSTOP;
+				else TWSTART;
 			}
 			break;
 		
 			/*READ PROCESS*/
-			//1. SLA+R has been tramsmitted and ACK received
+			//1. SLA+R has been transmitted and ACK received
 			case TWI_MRX_ADR_ACK:
 			if(TWI_bytesRequest==0){
 				TWNACK;
@@ -219,7 +221,7 @@ ISR(TWI_vect){
 			/*RECEIVE DATAS*/
 			//1. Previously addressed with own SLA+W; data has been received; ACK has been returned
 			case TWI_SRX_ADR_ACK:
-			TWACK; // Reset the TWI Interupt to wait for a new event.
+			TWACK; // Reset the TWI Interrupt to wait for a new event.
 			break;
 			
 			//2. Previously addressed with general call; data has been received; ACK has been returned
@@ -231,8 +233,8 @@ ISR(TWI_vect){
 			}else{
 				//buffer overflow
 			}
-			TWI_statusReg.lastTransOK = TRUE;  // Set flag transmission successfull.
-			TWACK; // Reset the TWI Interupt to wait for a new event.
+			TWI_statusReg.lastTransOK = TRUE;  // Set flag to transmission successful.
+			TWACK; // Reset the TWI Interrupt to wait for a new event.
 			break;
 		
 			/*SEND DATAS*/
@@ -344,7 +346,7 @@ void twi_master_init(uint8_t scl_frequency)
 	// TWSR = TWI_TWPS;							// Not used. Driver presumes prescaler to be 00.
 	TWDR = 0xFF;								// Default content = SDA released.
 	TWCR = (1<<TWEN)|							// Enable TWI-interface and release TWI pins.
-	(0<<TWIE)|(0<<TWINT)|						// Disable Interupt.
+	(0<<TWIE)|(0<<TWINT)|						// Disable Interrupt.
 	(0<<TWEA)|(0<<TWSTA)|(0<<TWSTO)|			// No Signal requests.
 	(0<<TWWC);									//
 }
@@ -361,7 +363,7 @@ void twi_master_transmits(uint8_t slaveAddress, const char *s)
 	// Wait until TWI is ready for next transmission.
 	while (twi_busy());
 	
-	//Reset State twi status
+	//Reset State TWI status
 	TWI_statusReg.lastTransOK=FALSE;
 	TWI_statusReg.currentState=TWI_STATE_SEND;
 	
@@ -389,7 +391,7 @@ void twi_master_transmitc(uint8_t slaveAddress, uint8_t data)
 	// Wait until TWI is ready for next transmission.
 	while (twi_busy());
 		
-	//Reset State twi status
+	//Reset State TWI status
 	TWI_statusReg.lastTransOK=FALSE;
 	TWI_statusReg.currentState=TWI_STATE_SEND;
 	
@@ -415,7 +417,7 @@ void twi_master_read(uint8_t slaveAddress, uint8_t numberOfBytes)
 	// Wait until TWI is ready for next transmission.
 	while (twi_busy());
 	
-	//Reset State twi status
+	//Reset State TWI status
 	TWI_statusReg.lastTransOK=FALSE;
 	TWI_statusReg.currentState=TWI_STATE_REQUEST;
 	
@@ -438,7 +440,7 @@ Returns:  none
 **************************************************************************/
 void twi_master_transmitToRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t data)
 {
-	//Reset State twi status
+	//Reset State TWI status
 	TWI_statusReg.lastTransOK=FALSE;
 	
 	// The first byte must always consist of General Call code or the TWI slave address.
@@ -467,6 +469,8 @@ Returns:  none
 **************************************************************************/
 void twi_master_readRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t numberOfBytes)
 {
+	automaticStop = 0;
+	
 	twi_master_transmitc(slaveAddress, regAdress);
 	
 	while(TWI_statusReg.lastTransOK==FALSE && twi_busy()) ;
@@ -474,6 +478,8 @@ void twi_master_readRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t nu
 	twi_master_read(slaveAddress, numberOfBytes);
 	
 	while(TWI_statusReg.lastTransOK==FALSE && twi_busy()) ;
+	
+	automaticStop = 1;
 }
 
 #elif defined(TWI_SLAVE_ENABLED)
@@ -489,7 +495,7 @@ void twi_slave_init(uint8_t address, uint8_t address_mask)
 	TWAR = (address<<TWI_ADR_BITS)| (TRUE<<TWI_GEN_BIT);	// Set own TWI slave address. Accept TWI General Calls.
 	TWAMR= address_mask<<TWI_ADR_BITS;						// Set own TWI slave address mask to enable respons on several addresses.
 	TWCR = (1<<TWEN)|										// Enable TWI-interface and release TWI pins.
-	(0<<TWIE)|(0<<TWINT)|									// Disable TWI Interupt.
+	(0<<TWIE)|(0<<TWINT)|									// Disable TWI Interrupt.
 	(0<<TWEA)|(0<<TWSTA)|(0<<TWSTO)|						// Do not ACK on any requests, yet.
 	(0<<TWWC);												//
 }
