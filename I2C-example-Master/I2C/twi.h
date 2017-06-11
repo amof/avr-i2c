@@ -77,9 +77,8 @@ struct TWI_statusReg
 {
 	uint8_t currentState;
 	uint8_t lastTransOK;
+	uint8_t readAtNextOp;
 };
-
-volatile struct TWI_statusReg TWI_statusReg;
 
 /************************************************************************/
 /* Functions prototype                                                  */

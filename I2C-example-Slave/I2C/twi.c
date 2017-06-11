@@ -32,6 +32,9 @@
 #define TWI_STATE_SEND		1
 #define TWI_STATE_REQUEST	2
 
+#define TWI_readAtNextOp_FALSE		0
+#define TWI_readAtNextOp_TRUE		1
+
 /*  Bit and byte definitions */
 
 #define TWI_READ_BIT  0   // Bit position for R/W bit in "address byte".
@@ -88,20 +91,21 @@
 							//TWI Interface enabled		|Enable TWI Interrupt and clear the flag to read next byte	|Send NACK after reception
 #define TWSTOP		TWCR =	(1<<TWEN)					|(0<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(0<<TWSTA)|(1<<TWSTO)		|(0<<TWWC)
 							//TWI Interface enabled		|Disable TWI Interrupt and clear the flag					|Initiate a STOP condition
-#define TWRESTART	TWCR =	(1<<TWEN)					|(1<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(1<<TWSTA)|(0<<TWSTO)		|(0<<TWWC)
-							//TWI Interface enabled		|Enable TWI Interrupt and clear the flag					|Initiate a (RE)START condition.		
+#define TWRESTART	TWCR =	(1<<TWEN)					|(0<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(1<<TWSTA)|(0<<TWSTO)		|(0<<TWWC)
+							//TWI Interface enabled		|Disable TWI Interrupt and clear the flag					|Initiate a (RE)START condition.	
+#define TWRELEASE	TWCR =	(1<<TWEN)					|(1<<TWIE)|(1<<TWINT)										|(0<<TWEA)|(1<<TWSTA)|(0<<TWSTO)		|(0<<TWWC)
+							//TWI Interface enabled		|Enable TWI Interrupt and clear the flag					|Initiate a (RE)START condition.
 
 /************************************************************************/
 /* Global variable                                                      */
 /************************************************************************/
-
+volatile struct TWI_statusReg TWI_statusReg;
 static volatile uint8_t TWI_TxBuf[TWI_RX_BUFFER_SIZE];
 static volatile uint8_t TWI_RxBuf[TWI_RX_BUFFER_SIZE];
 static volatile uint8_t TWI_TxHead;
 static volatile uint8_t TWI_TxTail;
 static volatile uint8_t TWI_RxHead;
 static volatile uint8_t TWI_RxTail;
-static volatile uint8_t automaticStop = 1;
 
 static volatile uint8_t TWI_bytesRequest;		// Number of bytes requested
 
@@ -143,7 +147,7 @@ ISR(TWI_vect){
 
 	uint16_t tmphead=0;
 	uint16_t tmptail=0;
-	
+			
 	switch (TWSR)
 	{
 		/*MASTER*/
@@ -167,11 +171,10 @@ ISR(TWI_vect){
 
 				TWDR = TWI_TxBuf[tmptail];
 				TWNACK;
-			}else // Send STOP after last byte
-			{
-				TWI_statusReg.lastTransOK = TRUE;			// Set status bits to completed successfully.
-				if(automaticStop==1)TWSTOP;
-				else TWSTART;
+			}else if(TWI_statusReg.readAtNextOp==TWI_readAtNextOp_TRUE){
+				TWRESTART;
+			}else{
+				TWSTOP;
 			}
 			break;
 		
@@ -279,7 +282,7 @@ ISR(TWI_vect){
 		
 		// Arbitration lost
 		case TWI_ARB_LOST:
-		TWRESTART;
+		TWRELEASE;
 		break;
 		
 		/*MASTER*/
@@ -341,6 +344,8 @@ void twi_master_init(uint8_t scl_frequency)
 {
 	//reset state
 	TWI_statusReg.currentState=TWI_STATE_WAIT;
+	TWI_statusReg.lastTransOK=FALSE;
+	TWI_statusReg.readAtNextOp=TWI_readAtNextOp_FALSE;
 	
 	TWBR = scl_frequency;						// Set bit rate register (Baudrate). Defined in header file.
 	// TWSR = TWI_TWPS;							// Not used. Driver presumes prescaler to be 00.
@@ -398,7 +403,7 @@ void twi_master_transmitc(uint8_t slaveAddress, uint8_t data)
 	// The first byte must always consist of General Call code or the TWI slave address.
 	twi_putc((slaveAddress<<TWI_ADR_BITS) | (FALSE<<TWI_READ_BIT));
 	
-	// Stores data in buffer
+	// Stores data in buffers
 	twi_putc(data);
 
 	// Launch the transmission
@@ -420,6 +425,7 @@ void twi_master_read(uint8_t slaveAddress, uint8_t numberOfBytes)
 	//Reset State TWI status
 	TWI_statusReg.lastTransOK=FALSE;
 	TWI_statusReg.currentState=TWI_STATE_REQUEST;
+	TWI_statusReg.readAtNextOp=TWI_readAtNextOp_FALSE;
 	
 	// last byte of data must be NACK
 	TWI_bytesRequest = numberOfBytes-1;  // Number of data to transmit.
@@ -469,17 +475,18 @@ Returns:  none
 **************************************************************************/
 void twi_master_readRegister(uint8_t slaveAddress, uint8_t regAdress, uint8_t numberOfBytes)
 {
-	automaticStop = 0;
-	
+	TWI_statusReg.readAtNextOp=TWI_readAtNextOp_TRUE;
+
 	twi_master_transmitc(slaveAddress, regAdress);
 	
 	while(TWI_statusReg.lastTransOK==FALSE && twi_busy()) ;
-	
+				
 	twi_master_read(slaveAddress, numberOfBytes);
 	
 	while(TWI_statusReg.lastTransOK==FALSE && twi_busy()) ;
+		
+	TWI_statusReg.readAtNextOp=TWI_readAtNextOp_FALSE;
 	
-	automaticStop = 1;
 }
 
 #elif defined(TWI_SLAVE_ENABLED)
